@@ -38,7 +38,9 @@ public:
       info += L"\r\n\r\n";
       info += text;
     }
-    MessageBox(hwnd_, info.data(), L"Carta Error", MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
+    if (hwnd_ == nullptr || IsWindow(hwnd_)) {
+      MessageBox(hwnd_, info.data(), L"Carta Error", MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
+    }
   }
 
   ice::task<void> OnCreate() noexcept {
