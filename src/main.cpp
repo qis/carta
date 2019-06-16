@@ -24,11 +24,11 @@ public:
     thread_.join();
   }
 
-  ice::schedule Io() noexcept {
-    return io_;
+  auto Io() noexcept {
+    return io_.schedule(false);
   }
 
-  void Exit() noexcept {
+  void Close() noexcept {
     EnableWindow(hwnd_, FALSE);
     PostMessage(hwnd_, WM_CLOSE, 0, 0);
   }
@@ -44,7 +44,11 @@ public:
   }
 
   ice::task<void> OnCreate() noexcept {
-    status_.Create(GetControl(IDC_STATUS));
+    if (const auto hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED); FAILED(hr)) {
+      ShowError(L"Could not initialize the COM library.", _com_error(hr).ErrorMessage());
+      co_return Close();
+    }
+    status_ = GetControl(IDC_STATUS);
     WINDOWPLACEMENT wp = {};
     DWORD type = REG_BINARY;
     DWORD size = sizeof(wp);
@@ -69,6 +73,8 @@ public:
 
   ice::task<void> OnDestroy() noexcept {
     PostQuitMessage(0);
+    co_await Io();
+    CoUninitialize();
     co_return;
   }
 
@@ -78,9 +84,9 @@ public:
 
     co_await Io();
 
-    auto state = status_.Set(L"Initializing COM library...");
+    auto state = status_.Set(L"One...");
     Sleep(1000);
-    state.Set(L"Initializing RAPI library...");
+    state.Set(L"Two...");
     Sleep(1000);
 
     // TODO

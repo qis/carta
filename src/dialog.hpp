@@ -40,20 +40,14 @@ public:
     }
 
     void await_suspend(std::experimental::coroutine_handle<> coroutine) noexcept {
-      coroutine_ = coroutine;
-      PostMessage(hwnd_, WM_DIALOG_CREATE, 0, reinterpret_cast<LPARAM>(this));
+      PostMessage(hwnd_, WM_DIALOG_CREATE, 0, reinterpret_cast<LPARAM>(coroutine.address()));
     }
 
-    void await_resume() {
-    }
-
-    void resume() noexcept {
-      coroutine_.resume();
+    constexpr void await_resume() noexcept {
     }
 
   private:
     const HWND hwnd_;
-    std::experimental::coroutine_handle<> coroutine_;
   };
 
   Dialog() noexcept = default;
@@ -85,8 +79,9 @@ public:
   ice::task<void> OnDestroy() noexcept = delete;
   ice::task<void> OnSize(LONG cx, LONG cy) noexcept = delete;
   ice::task<void> OnDpiChanged(UINT dpi, LPCRECT rc) noexcept = delete;
-  BOOL OnCommand(UINT code, UINT id, HWND hwnd) noexcept = delete;
   BOOL OnGetMinMaxInfo(LPMINMAXINFO mm) noexcept = delete;
+  BOOL OnCommand(UINT code, UINT id, HWND hwnd) noexcept = delete;
+  BOOL OnMessage(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) noexcept = delete;
 
   static void SetIcon(HINSTANCE hinstance, HWND hwnd, UINT dpi, UINT id, WPARAM type) noexcept {
     const auto size = GetIconSize(dpi, type);
@@ -266,10 +261,15 @@ private:
       case WM_CTLCOLORDLG:
         return reinterpret_cast<UINT_PTR>(GetStockObject(COLOR_WINDOWFRAME));
       case WM_DIALOG_RESUME:
-        if (const auto schedule = reinterpret_cast<Schedule*>(lparam)) {
-          schedule->resume();
+        if (lparam) {
+          std::experimental::coroutine_handle<>::from_address(reinterpret_cast<void*>(lparam)).resume();
         }
         return TRUE;
+      }
+      if constexpr (&T::OnMessage != &Dialog::OnMessage) {
+        if (static_cast<T*>(dialog)->OnMessage(hwnd, message, wparam, lparam)) {
+          return TRUE;
+        }
       }
     }
     return FALSE;
