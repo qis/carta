@@ -1,18 +1,22 @@
 #include "main.hpp"
 #include "dialog.hpp"
 #include "status.hpp"
+#include "table.hpp"
 #include <ice/context.hpp>
 #include <ice/utility.hpp>
 #include <comdef.h>
+#include <fmt/format.h>
 #include <wrl/client.h>
+#include <string>
+#include <string_view>
 #include <thread>
+#include <vector>
 
 using Microsoft::WRL::ComPtr;
 using namespace std::string_literals;
 
 class Application : public Dialog<Application> {
 public:
-
   // Height           | Note    | Control Options
   // -----------------|---------|------------------------
   // 0                | top     | DIALOGEX 0, 0, 400, 200
@@ -53,11 +57,17 @@ public:
   }
 
   ice::task<void> OnCreate() noexcept {
-    if (const auto hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED); FAILED(hr)) {
-      ShowError(L"Could not initialize the COM library.", _com_error(hr).ErrorMessage());
-      co_return Close();
-    }
+    // Create status.
     status_ = GetControl(IDC_STATUS);
+
+    // Create table.
+    table_ = GetControl(IDC_TABLE);
+    for (int col = 0; col < 10; col++) {
+      table_.AddColumn(fmt::format(L"Column {}", col).data(), 100);
+    }
+    table_.Resize(500);
+
+    // Show window.
     WINDOWPLACEMENT wp = {};
     DWORD type = REG_BINARY;
     DWORD size = sizeof(wp);
@@ -82,8 +92,6 @@ public:
 
   ice::task<void> OnDestroy() noexcept {
     PostQuitMessage(0);
-    co_await Io();
-    CoUninitialize();
     co_return;
   }
 
@@ -126,6 +134,86 @@ public:
     return FALSE;
   }
 
+  class Cache {
+  public:
+    Cache(int columns) noexcept : columns_(columns) {
+    }
+
+    void Load(int min, int max) noexcept {
+      if (min != min_ || max != max_) {
+        text_.clear();
+        data_.resize(static_cast<std::size_t>((max - min + 1) * columns_) * 2);
+        std::size_t pos = 0;
+        for (int row = min; row <= max; row++) {
+          for (int col = 0; col < columns_; col++) {
+            const auto beg = text_.size();
+            fmt::format_to(text_, L"{:03}:{:03}", row, col);
+            text_.push_back(L'\0');
+            const auto end = text_.size();
+            data_[pos++] = beg;
+            data_[pos++] = end - beg;
+          }
+        }
+      }
+      min_ = min;
+      max_ = max;
+    }
+
+    BOOL Get(LPWSTR dst, int max, int row, int col) noexcept {
+      if (row < min_ || row > max_) {
+        return FALSE;
+      }
+      const auto pos = static_cast<std::size_t>((row - min_) * columns_ + col);
+      const auto src = text_.data() + data_[pos];
+      const auto min = std::min(data_[pos + 1], static_cast<std::size_t>(max));
+      std::memcpy(dst, src, min * sizeof(wchar_t));
+      return TRUE;
+    }
+
+  private:
+    int min_ = 0;
+    int max_ = 0;
+    int columns_ = 0;
+    fmt::wmemory_buffer text_;
+    std::vector<std::size_t> data_;
+  };
+
+  Cache cache_{ 10 };
+
+  BOOL OnGetDispInfo(LVITEM& item) noexcept {
+    if (item.mask & LVIF_TEXT) {
+      return cache_.Get(item.pszText, item.cchTextMax, item.iItem, item.iSubItem);
+    }
+    return FALSE;
+  }
+
+  BOOL OnCacheHint(NMLVCACHEHINT& hint) noexcept {
+    if (hint.iFrom >= 0 && hint.iTo >= hint.iFrom) {
+      cache_.Load(hint.iFrom, hint.iTo);
+    }
+    return TRUE;
+  }
+
+  BOOL OnFindItem(NMLVFINDITEM& item) noexcept {
+    OutputDebugString(fmt::format(L"OnFindItem: {}\n", item.iStart).data());
+    return FALSE;
+  }
+
+  BOOL OnNotify(LPNMHDR msg) noexcept {
+    if (msg->idFrom == IDC_TABLE) {
+      const auto table = GetControl(IDC_TABLE);
+      switch (msg->code) {
+      case LVN_GETDISPINFO:
+        return OnGetDispInfo(reinterpret_cast<NMLVDISPINFO*>(msg)->item);
+      case LVN_ODCACHEHINT:
+        return OnCacheHint(*reinterpret_cast<NMLVCACHEHINT*>(msg));
+      case LVN_ODFINDITEM:
+        return OnFindItem(*reinterpret_cast<NMLVFINDITEM*>(msg));
+      }
+    }
+    return FALSE;
+  }
+
   static BOOL Initialize() noexcept {
     INITCOMMONCONTROLSEX icc = {};
     icc.dwSize = sizeof(icc);
@@ -146,6 +234,7 @@ private:
   ice::context io_;
   std::thread thread_;
   Status status_;
+  Table table_;
 };
 
 int WINAPI wWinMain(HINSTANCE hinstance, HINSTANCE, LPWSTR, int) {

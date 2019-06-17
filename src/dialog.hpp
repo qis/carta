@@ -81,6 +81,7 @@ public:
   ice::task<void> OnDpiChanged(UINT dpi, LPCRECT rc) noexcept = delete;
   BOOL OnGetMinMaxInfo(LPMINMAXINFO mm) noexcept = delete;
   BOOL OnCommand(UINT code, UINT id, HWND hwnd) noexcept = delete;
+  BOOL OnNotify(LPNMHDR msg) noexcept = delete;
   BOOL OnMessage(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) noexcept = delete;
 
   static void SetIcon(HINSTANCE hinstance, HWND hwnd, UINT dpi, UINT id, WPARAM type) noexcept {
@@ -112,7 +113,7 @@ protected:
   std::vector<Child> children_;
 
 private:
-  BOOL OnDialogCreate() noexcept {
+  __forceinline BOOL OnDialogCreate() noexcept {
     RECT rc = {};
     GetClientRect(hwnd_, &rc);
     const auto cx = rc.right - rc.left;
@@ -154,21 +155,21 @@ private:
     return TRUE;
   }
 
-  BOOL OnDialogClose() noexcept {
+  __forceinline BOOL OnDialogClose() noexcept {
     if constexpr (&T::OnClose != &Dialog::OnClose) {
       static_cast<T*>(this)->OnClose().detach();
     }
     return TRUE;
   }
 
-  BOOL OnDialogDestroy() noexcept {
+  __forceinline BOOL OnDialogDestroy() noexcept {
     if constexpr (&T::OnDestroy != &Dialog::OnDestroy) {
       static_cast<T*>(this)->OnDestroy().detach();
     }
     return TRUE;
   }
 
-  BOOL OnDialogSize(LONG cx, LONG cy) noexcept {
+  __forceinline BOOL OnDialogSize(LONG cx, LONG cy) noexcept {
     const auto dpi = GetDpiForWindow(hwnd_);
     const auto scale = dpi / static_cast<double>(layout_.dpi);
     const auto dx = cx - (dpi == layout_.dpi ? layout_.basex : static_cast<LONG>(layout_.basex * scale));
@@ -206,7 +207,7 @@ private:
     return TRUE;
   }
 
-  BOOL OnDialogDpiChanged(UINT dpi, LPCRECT rc) noexcept {
+  __forceinline BOOL OnDialogDpiChanged(UINT dpi, LPCRECT rc) noexcept {
     SetIcon(hinstance_, hwnd_, dpi, IDI_MAIN, ICON_SMALL);
     SetIcon(hinstance_, hwnd_, dpi, IDI_MAIN, ICON_BIG);
     if constexpr (&T::OnDpiChanged != &Dialog::OnDpiChanged) {
@@ -215,7 +216,7 @@ private:
     return TRUE;
   }
 
-  BOOL OnDialogGetMinMaxInfo(LPMINMAXINFO mm) noexcept {
+  __forceinline BOOL OnDialogGetMinMaxInfo(LPMINMAXINFO mm) noexcept {
     const auto dpi = GetDpiForWindow(hwnd_);
     const auto scale = dpi / static_cast<double>(layout_.dpi);
     if (layout_.minx) {
@@ -230,9 +231,16 @@ private:
     return TRUE;
   }
 
-  BOOL OnDialogCommand(UINT code, UINT id, HWND hwnd) noexcept {
+  __forceinline BOOL OnDialogCommand(UINT code, UINT id, HWND hwnd) noexcept {
     if constexpr (&T::OnCommand != &Dialog::OnCommand) {
       return static_cast<T*>(this)->OnCommand(code, id, hwnd);
+    }
+    return FALSE;
+  }
+
+  __forceinline BOOL OnDialogNotify(LPNMHDR msg) noexcept {
+    if constexpr (&T::OnNotify != &Dialog::OnNotify) {
+      return static_cast<T*>(this)->OnNotify(msg);
     }
     return FALSE;
   }
@@ -258,6 +266,8 @@ private:
         return dialog->OnDialogGetMinMaxInfo(reinterpret_cast<LPMINMAXINFO>(lparam));
       case WM_COMMAND:
         return dialog->OnDialogCommand(HIWORD(wparam), LOWORD(wparam), reinterpret_cast<HWND>(lparam));
+      case WM_NOTIFY:
+        return dialog->OnDialogNotify(reinterpret_cast<LPNMHDR>(lparam));
       case WM_CTLCOLORDLG:
         return reinterpret_cast<UINT_PTR>(GetStockObject(COLOR_WINDOWFRAME));
       case WM_DIALOG_RESUME:
