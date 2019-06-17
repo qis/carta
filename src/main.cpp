@@ -12,6 +12,15 @@ using namespace std::string_literals;
 
 class Application : public Dialog<Application> {
 public:
+
+  // Height           | Note    | Control Options
+  // -----------------|---------|------------------------
+  // 0                | top     | DIALOGEX 0, 0, 400, 200
+  // 2                | padding | TOPMARGIN, 2
+  // 2 + 183          | padding | BOTTOMMARGIN, 185
+  // 2 + 183 + 2      | task    | 0,187,400,13
+  // 2 + 183 + 2 + 13 | bottom  | DIALOGEX 0, 0, 400, 200
+
   constexpr static auto settings = L"Software\\Xiphos\\Carta";
 
   Application(HINSTANCE hinstance) noexcept {
@@ -78,28 +87,28 @@ public:
     co_return;
   }
 
-  ice::task<void> OnTest() noexcept {
-    EnableWindow(GetControl(IDC_TEST), FALSE);
-    const auto enable_button = ice::on_scope_exit([this]() { EnableWindow(GetControl(IDC_TEST), TRUE); });
-
-    co_await Io();
-
-    auto state = status_.Set(L"One...");
-    Sleep(1000);
-    state.Set(L"Two...");
-    Sleep(1000);
-
-    // TODO
-
-    co_return;
-  }
+  //ice::task<void> OnTest() noexcept {
+  //  EnableWindow(GetControl(IDC_TEST), FALSE);
+  //  const auto enable_button = ice::on_scope_exit([this]() { EnableWindow(GetControl(IDC_TEST), TRUE); });
+  //
+  //  co_await Io();
+  //
+  //  auto state = status_.Set(L"One...");
+  //  Sleep(1000);
+  //  state.Set(L"Two...");
+  //  Sleep(1000);
+  //
+  //  // TODO
+  //
+  //  co_return;
+  //}
 
   BOOL OnMenu(UINT id) noexcept {
-    switch (id) {
-    case IDC_TEST:
-      OnTest().detach();
-      return TRUE;
-    }
+    //switch (id) {
+    //case IDC_TEST:
+    //  OnTest().detach();
+    //  return TRUE;
+    //}
     return FALSE;
   }
 
@@ -120,7 +129,7 @@ public:
   static BOOL Initialize() noexcept {
     INITCOMMONCONTROLSEX icc = {};
     icc.dwSize = sizeof(icc);
-    icc.dwICC = ICC_BAR_CLASSES;
+    icc.dwICC = ICC_STANDARD_CLASSES | ICC_BAR_CLASSES | ICC_LISTVIEW_CLASSES | ICC_PROGRESS_CLASS;
     return InitCommonControlsEx(&icc);
   }
 

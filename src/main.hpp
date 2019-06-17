@@ -4,11 +4,11 @@
 //
 #define IDI_MAIN                        101
 #define IDD_MAIN                        102
-#define IDC_STATUS                      1001
-#define IDC_TEST                        1002
+#define IDC_TABLE                       1001
+#define IDC_STATUS                      1002
 
 // Next default values for new objects
-// 
+//
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        103
