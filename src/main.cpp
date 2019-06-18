@@ -12,11 +12,16 @@
 #include <thread>
 #include <vector>
 
+#include <uxtheme.h>
+#pragma comment(lib, "uxtheme.lib")
+
 using Microsoft::WRL::ComPtr;
 using namespace std::string_literals;
 
 class Application : public Dialog<Application> {
 public:
+  // Table
+  // ====================================================
   // Height           | Note    | Control Options
   // -----------------|---------|------------------------
   // 0                | top     | DIALOGEX 0, 0, 400, 200
@@ -95,6 +100,24 @@ public:
     co_return;
   }
 
+  BOOL OnSize(LONG cx, LONG cy) noexcept {
+    const auto thwnd = GetControl(IDC_TABLE);
+    const auto phwnd = GetControl(IDC_PREVIEW);
+    RECT trc = {};
+    GetWindowRect(thwnd, &trc);
+    RECT prc = {};
+    GetWindowRect(phwnd, &prc);
+    MapWindowPoints(nullptr, hwnd_, reinterpret_cast<PPOINT>(&prc), 2);
+    const auto dx = (prc.bottom - prc.top) * 210L / 297L - (prc.right - prc.left);
+    const auto wp = BeginDeferWindowPos(2);
+    constexpr auto tflags = SWP_NOZORDER | SWP_NOREPOSITION | SWP_NOACTIVATE | SWP_NOCOPYBITS | SWP_NOMOVE;
+    DeferWindowPos(wp, thwnd, nullptr, 0, 0, trc.right - trc.left - dx, trc.bottom - trc.top, tflags);
+    constexpr auto pflags = SWP_NOZORDER | SWP_NOREPOSITION | SWP_NOACTIVATE | SWP_NOCOPYBITS;
+    DeferWindowPos(wp, phwnd, nullptr, prc.left - dx, prc.top, prc.right - prc.left + dx, prc.bottom - prc.top, pflags);
+    EndDeferWindowPos(wp);
+    return TRUE;
+  }
+
   //ice::task<void> OnTest() noexcept {
   //  EnableWindow(GetControl(IDC_TEST), FALSE);
   //  const auto enable_button = ice::on_scope_exit([this]() { EnableWindow(GetControl(IDC_TEST), TRUE); });
@@ -158,6 +181,18 @@ public:
       case LVN_ODFINDITEM:
         return OnFindItem(*reinterpret_cast<NMLVFINDITEM*>(msg));
       }
+    }
+    return FALSE;
+  }
+
+  const HBRUSH white_ = reinterpret_cast<HBRUSH>(GetStockObject(WHITE_BRUSH));
+  const HBRUSH gray_ = reinterpret_cast<HBRUSH>(GetStockObject(GRAY_BRUSH));
+
+  BOOL OnDrawItem(UINT id, LPDRAWITEMSTRUCT draw) noexcept {
+    if (id == IDC_PREVIEW) {
+      //FillRect(draw->hDC, &draw->rcItem, white_);
+      FrameRect(draw->hDC, &draw->rcItem, gray_);
+      return TRUE;
     }
     return FALSE;
   }

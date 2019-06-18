@@ -77,11 +77,12 @@ public:
   ice::task<void> OnCreate() noexcept = delete;
   ice::task<void> OnClose() noexcept = delete;
   ice::task<void> OnDestroy() noexcept = delete;
-  ice::task<void> OnSize(LONG cx, LONG cy) noexcept = delete;
-  ice::task<void> OnDpiChanged(UINT dpi, LPCRECT rc) noexcept = delete;
+  BOOL OnSize(LONG cx, LONG cy) noexcept = delete;
+  BOOL OnDpiChanged(UINT dpi, LPCRECT rc) noexcept = delete;
   BOOL OnGetMinMaxInfo(LPMINMAXINFO mm) noexcept = delete;
   BOOL OnCommand(UINT code, UINT id, HWND hwnd) noexcept = delete;
   BOOL OnNotify(LPNMHDR msg) noexcept = delete;
+  BOOL OnDrawItem(UINT id, LPDRAWITEMSTRUCT draw) noexcept = delete;
   BOOL OnMessage(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) noexcept = delete;
 
   static void SetIcon(HINSTANCE hinstance, HWND hwnd, UINT dpi, UINT id, WPARAM type) noexcept {
@@ -202,7 +203,7 @@ private:
     }
     EndDeferWindowPos(wp);
     if constexpr (&T::OnSize != &Dialog::OnSize) {
-      static_cast<T*>(this)->OnSize(cx, cy).detach();
+      return static_cast<T*>(this)->OnSize(cx, cy);
     }
     return TRUE;
   }
@@ -211,7 +212,7 @@ private:
     SetIcon(hinstance_, hwnd_, dpi, IDI_MAIN, ICON_SMALL);
     SetIcon(hinstance_, hwnd_, dpi, IDI_MAIN, ICON_BIG);
     if constexpr (&T::OnDpiChanged != &Dialog::OnDpiChanged) {
-      static_cast<T*>(this)->OnDpiChanged(dpi, rc).detach();
+      return static_cast<T*>(this)->OnDpiChanged(dpi, rc);
     }
     return TRUE;
   }
@@ -245,6 +246,13 @@ private:
     return FALSE;
   }
 
+  __forceinline BOOL OnDialogDrawItem(UINT id, LPDRAWITEMSTRUCT draw) noexcept {
+    if constexpr (&T::OnDrawItem != &Dialog::OnDrawItem) {
+      return static_cast<T*>(this)->OnDrawItem(id, draw);
+    }
+    return FALSE;
+  }
+
   static INT_PTR CALLBACK Proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) noexcept {
     if (message == WM_INITDIALOG) {
       SetWindowLongPtr(hwnd, GWLP_USERDATA, static_cast<LONG_PTR>(lparam));
@@ -268,6 +276,8 @@ private:
         return dialog->OnDialogCommand(HIWORD(wparam), LOWORD(wparam), reinterpret_cast<HWND>(lparam));
       case WM_NOTIFY:
         return dialog->OnDialogNotify(reinterpret_cast<LPNMHDR>(lparam));
+      case WM_DRAWITEM:
+        return dialog->OnDialogDrawItem(static_cast<UINT>(wparam), reinterpret_cast<LPDRAWITEMSTRUCT>(lparam));
       case WM_CTLCOLORDLG:
         return reinterpret_cast<UINT_PTR>(GetStockObject(COLOR_WINDOWFRAME));
       case WM_DIALOG_RESUME:
