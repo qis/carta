@@ -1,6 +1,7 @@
 #pragma once
 #include <ice/task.hpp>
 #include <windows.h>
+#include <windowsx.h>
 #include <vector>
 #include <cassert>
 
