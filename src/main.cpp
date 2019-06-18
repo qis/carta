@@ -6,7 +6,6 @@
 #include <ice/utility.hpp>
 #include <comdef.h>
 #include <fmt/format.h>
-#include <turbojpeg.h>
 #include <wrl/client.h>
 #include <string>
 #include <string_view>
@@ -83,58 +82,30 @@ public:
       ShowWindow(hwnd_, SW_SHOW);
     }
 
-    co_await Io();
+    //co_await Io();
 
     // Load test image.
-    const auto decompressor = tjInitDecompress();
-    if (!decompressor) {
-      ShowError(L"Could not initialize libjpeg-turbo.");
-      co_return;
-    }
-    const auto destroy_decompressor = ice::on_scope_exit([&]() {
-      tjDestroy(decompressor);
-    });
-
     std::ifstream is(L"doc/DIN 5008.jpg", std::ios::binary);
     if (!is) {
       ShowError(L"Could not open image.");
       co_return;
     }
-    std::vector<unsigned char> src;
     is.seekg(0, std::ios::end);
-    src.resize(static_cast<std::size_t>(is.tellg()));
+    preview_.resize(static_cast<std::size_t>(is.tellg()));
     is.seekg(0, std::ios::beg);
-    if (!is.read(reinterpret_cast<char*>(src.data()), src.size())) {
+    if (!is.read(preview_.data(), preview_.size())) {
       ShowError(L"Could not read image.");
       co_return;
     }
-
-    const auto src_data = src.data();
-    const auto src_size = static_cast<unsigned long>(src.size());
-    int cx = 0;
-    int cy = 0;
-    int ss = 0;
-    if (tjDecompressHeader2(decompressor, src_data, src_size, &cx, &cy, &ss)) {
-      ShowError(L"Could not load image header.");
-      co_return;
-    }
-
-
-    bitmap_.resize(cx * cy * 3);
-    if (tjDecompress2(decompressor, src_data, src_size, bitmap_.data(), cx, 0, cy, TJPF_RGB, TJFLAG_BOTTOMUP | TJFLAG_ACCURATEDCT)) {
-      ShowError(L"Could not load image.");
-      co_return;
-    }
-    bitmap_cx_ = static_cast<LONG>(cx);
-    bitmap_cy_ = static_cast<LONG>(cy);
-
+    preview_cx_ = 1792;
+    preview_cy_ = 2541;
     InvalidateRect(GetControl(IDC_PREVIEW), nullptr, FALSE);
     co_return;
   }
 
-  LONG bitmap_cx_ = 0;
-  LONG bitmap_cy_ = 0;
-  std::vector<unsigned char> bitmap_;
+  LONG preview_cx_ = 0;
+  LONG preview_cy_ = 0;
+  std::vector<char> preview_;
 
   ice::task<void> OnClose() noexcept {
     ShowWindow(hwnd_, SW_HIDE);
@@ -244,20 +215,22 @@ public:
       RECT rc = {};
       GetClientRect(draw->hwndItem, &rc);
 
+      // https://github.com/tpn/windows-graphics-programming-src/blob/eb66dde2f3119fb0910232a6df3e9c94dbeb02db/Chapt_17/ImagePrint/imageview.cpp
+
       BITMAPINFO info = {};
-      info.bmiHeader.biSize = sizeof(BITMAPINFO);
-      info.bmiHeader.biWidth = bitmap_cx_;
-      info.bmiHeader.biHeight = bitmap_cy_;
-      info.bmiHeader.biBitCount = 24;
+      info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+      info.bmiHeader.biWidth = preview_cx_;
+      info.bmiHeader.biHeight = preview_cy_;
       info.bmiHeader.biPlanes = 1;
-      info.bmiHeader.biSizeImage = static_cast<DWORD>(bitmap_.size());
-      info.bmiHeader.biCompression = BI_RGB;  // TODO: jpeg?
-      const auto scx = static_cast<int>(bitmap_cx_);
-      const auto scy = static_cast<int>(bitmap_cy_);
+      info.bmiHeader.biBitCount = 0;
+      info.bmiHeader.biCompression = BI_JPEG;
+      info.bmiHeader.biSizeImage = static_cast<DWORD>(preview_.size());
+      const auto scx = static_cast<int>(preview_cx_);
+      const auto scy = static_cast<int>(preview_cy_);
       const auto dcx = static_cast<int>(rc.right - rc.left);
       const auto dcy = static_cast<int>(rc.bottom - rc.top);
-      const auto src = bitmap_.data();
-      SetStretchBltMode(draw->hDC, HALFTONE);
+      const auto src = preview_.data();
+      SetStretchBltMode(draw->hDC, STRETCH_HALFTONE);
       StretchDIBits(draw->hDC, 0, 0, dcx, dcy, 0, 0, scx, scy, src, &info, DIB_RGB_COLORS, SRCCOPY);
 
       FrameRect(draw->hDC, &draw->rcItem, gray_);
