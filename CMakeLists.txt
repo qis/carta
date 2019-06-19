@@ -34,18 +34,6 @@ target_compile_options(${PROJECT_NAME} PRIVATE $<$<CONFIG:Debug>:/ZI>)
 find_package(fmt CONFIG REQUIRED)
 target_link_libraries(${PROJECT_NAME} PRIVATE fmt::fmt)
 
-find_path(TURBOJPEG_INCLUDE_DIR turbojpeg.h
-  PATHS ${_VCPKG_ROOT_DIR}/installed/${VCPKG_TARGET_TRIPLET}/include NO_DEFAULT_PATH)
-find_library(TURBOJPEG_LIBRARY_DEBUG NAMES turbojpeg turbojpegd
-  PATHS ${_VCPKG_ROOT_DIR}/installed/${VCPKG_TARGET_TRIPLET}/debug/lib NO_DEFAULT_PATH)
-find_library(TURBOJPEG_LIBRARY_RELEASE NAMES turbojpeg
-  PATHS ${_VCPKG_ROOT_DIR}/installed/${VCPKG_TARGET_TRIPLET}/lib NO_DEFAULT_PATH)
-if(NOT TURBOJPEG_INCLUDE_DIR OR NOT TURBOJPEG_LIBRARY_DEBUG OR NOT TURBOJPEG_LIBRARY_RELEASE)
-  message(FATAL_ERROR "Could not find library: libjpeg-turbo")
-endif()
-target_include_directories(${PROJECT_NAME} PUBLIC ${TURBOJPEG_INCLUDE_DIR})
-target_link_libraries(${PROJECT_NAME} PUBLIC debug ${TURBOJPEG_LIBRARY_DEBUG} optimized ${TURBOJPEG_LIBRARY_RELEASE})
-
 include(tzdata)
 tzdata("2019a" ${CMAKE_CURRENT_SOURCE_DIR}/tzdata)
 

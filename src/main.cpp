@@ -6,6 +6,7 @@
 #include <ice/utility.hpp>
 #include <comdef.h>
 #include <fmt/format.h>
+#include <wincodec.h>
 #include <wrl/client.h>
 #include <string>
 #include <string_view>
@@ -61,17 +62,47 @@ public:
   }
 
   ice::task<void> OnCreate() noexcept {
-    // Create status.
     status_ = GetControl(IDC_STATUS);
-
-    // Create table.
     table_ = GetControl(IDC_TABLE);
     for (int col = 0; col < 10; col++) {
       table_.AddColumn(fmt::format(L"Column {}", col).data(), 100);
     }
     table_.Resize(100'000'000);
 
-    // Show window.
+    auto hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    if (FAILED(hr)) {
+      ShowError(L"Could not initialize COM library.", _com_error(hr).ErrorMessage());
+      co_return Close();
+    }
+
+    auto factory_ptr = reinterpret_cast<void**>(factory_.GetAddressOf());
+    hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, __uuidof(factory_), factory_ptr);
+    if (FAILED(hr)) {
+      ShowError(L"Could not create imaging factory.", _com_error(hr).ErrorMessage());
+      co_return Close();
+    }
+
+    ComPtr<IWICBitmapDecoder> decoder;
+    const auto path = L"doc/DIN 5008.jpg";
+    hr = factory_->CreateDecoderFromFilename(path, nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, decoder.GetAddressOf());
+    if (FAILED(hr)) {
+      ShowError(L"Could not create bitmap decoder.", _com_error(hr).ErrorMessage());
+      co_return Close();
+    }
+
+    ComPtr<IWICBitmapFrameDecode> frame;
+    hr = decoder->GetFrame(0, frame.GetAddressOf());
+    if (FAILED(hr)) {
+      ShowError(L"Could not get image frame.", _com_error(hr).ErrorMessage());
+      co_return Close();
+    }
+
+    hr = frame->QueryInterface(__uuidof(IWICBitmapSource), reinterpret_cast<void**>(source_.GetAddressOf()));
+    if (FAILED(hr)) {
+      ShowError(L"Could not get image source.", _com_error(hr).ErrorMessage());
+      co_return Close();
+    }
+
     WINDOWPLACEMENT wp = {};
     DWORD wt = REG_BINARY;
     DWORD ws = sizeof(wp);
@@ -81,31 +112,8 @@ public:
     } else {
       ShowWindow(hwnd_, SW_SHOW);
     }
-
-    //co_await Io();
-
-    // Load test image.
-    std::ifstream is(L"doc/DIN 5008.jpg", std::ios::binary);
-    if (!is) {
-      ShowError(L"Could not open image.");
-      co_return;
-    }
-    is.seekg(0, std::ios::end);
-    preview_.resize(static_cast<std::size_t>(is.tellg()));
-    is.seekg(0, std::ios::beg);
-    if (!is.read(preview_.data(), preview_.size())) {
-      ShowError(L"Could not read image.");
-      co_return;
-    }
-    preview_cx_ = 1792;
-    preview_cy_ = 2541;
-    InvalidateRect(GetControl(IDC_PREVIEW), nullptr, FALSE);
     co_return;
   }
-
-  LONG preview_cx_ = 0;
-  LONG preview_cy_ = 0;
-  std::vector<char> preview_;
 
   ice::task<void> OnClose() noexcept {
     ShowWindow(hwnd_, SW_HIDE);
@@ -119,6 +127,8 @@ public:
 
   ice::task<void> OnDestroy() noexcept {
     PostQuitMessage(0);
+    co_await Io();
+    CoUninitialize();
     co_return;
   }
 
@@ -208,30 +218,126 @@ public:
   const HBRUSH white_ = reinterpret_cast<HBRUSH>(GetStockObject(WHITE_BRUSH));
   const HBRUSH gray_ = reinterpret_cast<HBRUSH>(GetStockObject(GRAY_BRUSH));
 
+  ComPtr<IWICImagingFactory> factory_;
+  ComPtr<IWICBitmapSource> source_;
+  HBITMAP bitmap_{ nullptr };
+
   BOOL OnDrawItem(UINT id, LPDRAWITEMSTRUCT draw) noexcept {
     if (id == IDC_PREVIEW) {
       FillRect(draw->hDC, &draw->rcItem, white_);
 
-      RECT rc = {};
-      GetClientRect(draw->hwndItem, &rc);
+      ComPtr<IWICBitmapScaler> scaler;
+      auto hr = factory_->CreateBitmapScaler(scaler.GetAddressOf());
+      if (FAILED(hr)) {
+        ShowError(L"Could not create bitmap scaler.", _com_error(hr).ErrorMessage());
+        PostQuitMessage(1);
+        return FALSE;
+      }
 
-      // https://github.com/tpn/windows-graphics-programming-src/blob/eb66dde2f3119fb0910232a6df3e9c94dbeb02db/Chapt_17/ImagePrint/imageview.cpp
+      const auto dcx = static_cast<UINT>(draw->rcItem.right - draw->rcItem.left);
+      const auto dcy = static_cast<UINT>(draw->rcItem.bottom - draw->rcItem.top);
+      hr = scaler->Initialize(source_.Get(), dcx, dcy, WICBitmapInterpolationModeFant);
+      if (FAILED(hr)) {
+        ShowError(L"Could not initialize scaler.", _com_error(hr).ErrorMessage());
+        PostQuitMessage(1);
+        return FALSE;
+      }
 
-      BITMAPINFO info = {};
-      info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-      info.bmiHeader.biWidth = preview_cx_;
-      info.bmiHeader.biHeight = preview_cy_;
-      info.bmiHeader.biPlanes = 1;
-      info.bmiHeader.biBitCount = 0;
-      info.bmiHeader.biCompression = BI_JPEG;
-      info.bmiHeader.biSizeImage = static_cast<DWORD>(preview_.size());
-      const auto scx = static_cast<int>(preview_cx_);
-      const auto scy = static_cast<int>(preview_cy_);
-      const auto dcx = static_cast<int>(rc.right - rc.left);
-      const auto dcy = static_cast<int>(rc.bottom - rc.top);
-      const auto src = preview_.data();
-      SetStretchBltMode(draw->hDC, STRETCH_HALFTONE);
-      StretchDIBits(draw->hDC, 0, 0, dcx, dcy, 0, 0, scx, scy, src, &info, DIB_RGB_COLORS, SRCCOPY);
+      ComPtr<IWICFormatConverter> converter;
+      hr = factory_->CreateFormatConverter(converter.GetAddressOf());
+      if (FAILED(hr)) {
+        ShowError(L"Could not create format converter.", _com_error(hr).ErrorMessage());
+        PostQuitMessage(1);
+        return FALSE;
+      }
+
+      hr = converter->Initialize(scaler.Get(), GUID_WICPixelFormat32bppBGR, WICBitmapDitherTypeNone, nullptr, 0.f, WICBitmapPaletteTypeCustom);
+      if (FAILED(hr)) {
+        ShowError(L"Could not initialize converter.", _com_error(hr).ErrorMessage());
+        PostQuitMessage(1);
+        return FALSE;
+      }
+
+      ComPtr<IWICBitmapSource> source;
+      hr = converter->QueryInterface(__uuidof(source), reinterpret_cast<void**>(source.GetAddressOf()));
+      if (FAILED(hr)) {
+        ShowError(L"Could not create scaled source.", _com_error(hr).ErrorMessage());
+        PostQuitMessage(1);
+        return FALSE;
+      }
+
+      WICPixelFormatGUID format = {};
+      hr = source->GetPixelFormat(&format);
+      if (FAILED(hr)) {
+        ShowError(L"Could not get pixel format.", _com_error(hr).ErrorMessage());
+        PostQuitMessage(1);
+        return FALSE;
+      }
+      assert(format == GUID_WICPixelFormat32bppBGR);
+
+      UINT scx = 0;
+      UINT scy = 0;
+      hr = source->GetSize(&scx, &scy);
+      if (FAILED(hr)) {
+        ShowError(L"Could not get image dimensions.", _com_error(hr).ErrorMessage());
+        PostQuitMessage(1);
+        return FALSE;
+      }
+      assert(scx > 0);
+      assert(scy > 0);
+
+      BITMAPINFO bmi = {};
+      bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+      bmi.bmiHeader.biWidth = static_cast<LONG>(scx);
+      bmi.bmiHeader.biHeight = -static_cast<LONG>(scy);
+      bmi.bmiHeader.biPlanes = 1;
+      bmi.bmiHeader.biBitCount = 32;
+      bmi.bmiHeader.biCompression = BI_RGB;
+
+      PVOID data = nullptr;
+      if (const auto screen = GetDC(nullptr)) {
+        if (bitmap_) {
+          DeleteObject(bitmap_);
+        }
+        bitmap_ = CreateDIBSection(screen, &bmi, DIB_RGB_COLORS, &data, nullptr, 0);
+        ReleaseDC(nullptr, screen);
+      }
+
+      if (bitmap_ && data) {
+        UINT stride = 0;
+        hr = UIntMult(scx, sizeof(DWORD), &stride);
+        if (FAILED(hr)) {
+          ShowError(L"Could not get image stride.", _com_error(hr).ErrorMessage());
+          PostQuitMessage(1);
+          return FALSE;
+        }
+
+        UINT size = 0;
+        hr = UIntMult(stride, scy, &size);
+        if (FAILED(hr)) {
+          ShowError(L"Could not get image size.", _com_error(hr).ErrorMessage());
+          PostQuitMessage(1);
+          return FALSE;
+        }
+
+        hr = source->CopyPixels(nullptr, stride, size, reinterpret_cast<BYTE*>(data));
+        if (FAILED(hr)) {
+          ShowError(L"Could not copy image data.", _com_error(hr).ErrorMessage());
+          PostQuitMessage(1);
+          return FALSE;
+        }
+
+        if (const auto mem = CreateCompatibleDC(nullptr)) {
+          if (const auto old = SelectBitmap(mem, bitmap_)) {
+            BITMAP bm;
+            if (GetObject(bitmap_, sizeof(bm), &bm) == sizeof(bm)) {
+              BitBlt(draw->hDC, 0, 0, bm.bmWidth, bm.bmHeight, mem, 0, 0, SRCCOPY);
+              SelectBitmap(mem, old);
+            }
+          }
+          DeleteDC(mem);
+        }
+      }
 
       FrameRect(draw->hDC, &draw->rcItem, gray_);
       return TRUE;

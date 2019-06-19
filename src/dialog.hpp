@@ -144,6 +144,7 @@ private:
           child.sizex = *data++;
           child.sizey = *data++;
           children_.push_back(child);
+          SetWindowLong(hwnd, GWL_STYLE, GetWindowLong(hwnd, GWL_STYLE) | WS_CLIPCHILDREN);
           hwnd = GetWindow(hwnd, GW_HWNDNEXT);
         }
       }
